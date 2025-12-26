@@ -60,11 +60,10 @@
     <div id="overlay"><h1>TetraCrush</h1><button class="start-btn" id="start-btn">PLAY</button></div>
 
     <script>
-        // ... (I have included the full 500+ lines of your game logic here) ...
         const COLS = 10, ROWS = 20; let BLOCK_SIZE = 30;
         const CANDY_TYPES = [null,{ color: '#00ffff', type: 'star' },{ color: '#0044ff', type: 'circle' },{ color: '#ffa500', type: 'fish' },{ color: '#ffff00', type: 'oval' },{ color: '#00ff00', type: 'rounded' },{ color: '#c200ff', type: 'bean' },{ color: '#ff0033', type: 'fish', rot:1}];
         const SHAPES = [[],[[0,0,0,0], [1,1,1,1], [0,0,0,0], [0,0,0,0]],[[2,0,0], [2,2,2], [0,0,0]],[[0,0,3], [3,3,3], [0,0,0]],[[4,4], [4,4]],[[0,5,5], [5,5,0], [0,0,0]],[[0,6,0], [6,6,6], [0,0,0]],[[7,7,0], [0,7,7], [0,0,0]]];
-        let canvas, ctx, previewCanvas, previewCtx, board = [], score = 0, level = 1, chaosMeter = 0, gameOver = false, isChaosMode = false, chaosTimeLeft = 0, lastTime = 0, dropCounter = 0, animationId, player = { pos: {x: 0, y: 0}, matrix: null, type: null }, nextType = null, isProcessing = false, cascadeTimer = 0;
+        let canvas, ctx, previewCanvas, previewCtx, board = [], score = 0, level = 1, chaosMeter = 0, gameOver = false, isChaosMode = false, chaosTimeLeft = 0, lastTime = 0, dropCounter = 0, animationId, player = { pos: {x: 0, y: 0}, matrix: null, type: null }, nextType = null, isProcessing = false;
 
         window.onload = () => {
             canvas = document.getElementById('board'); ctx = canvas.getContext('2d', { alpha: false });
@@ -89,16 +88,69 @@
 
         function update(time = 0) {
             if (gameOver) return; const dt = time - lastTime; lastTime = time; dropCounter += dt;
-            if (isChaosMode) {
-                chaosTimeLeft -= dt / 1000;
-                if (chaosTimeLeft <= 0) { endChaosMode(); } else {
-                    const meterPct = (chaosTimeLeft / 15) * 100; document.getElementById('meter-fill').style.width = meterPct + '%';
-                    cascadeTimer += dt; if (cascadeTimer > 100) { const moved = applyGravity(); if (!moved) checkChaosMatches(); cascadeTimer = 0; }
-                }
-            }
             const interval = isChaosMode ? 400 : Math.max(100, Math.pow(0.94, level - 1) * 1500);
             if (!isProcessing && dropCounter > interval) { playerDrop(); dropCounter = 0; }
             draw(); animationId = requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.fillStyle = '#1e1526'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < ROWS; y++) { for (let x = 0; x < COLS; x++) { if (board[y][x] !== 0) drawCandy(ctx, x, y, board[y][x], BLOCK_SIZE); } }
+            if (player.matrix) { player.matrix.forEach((row, y) => row.forEach((v, x) => { if (v) drawCandy(ctx, player.pos.x + x, player.pos.y + y, v, BLOCK_SIZE); })); }
+        }
+
+        function drawCandy(targetCtx, x, y, id, size) {
+            const cx = x * size + size / 2, cy = y * size + size / 2, s = size * 0.75, candy = CANDY_TYPES[id];
+            targetCtx.save(); targetCtx.translate(cx, cy);
+            targetCtx.fillStyle = candy.color; targetCtx.beginPath(); targetCtx.arc(0, 0, s/2, 0, Math.PI*2); targetCtx.fill(); targetCtx.restore();
+        }
+
+        function spawnPiece() {
+            const typeIdx = nextType; nextType = (Math.random() * 7 | 0) + 1; drawPreview();
+            player.type = typeIdx; player.matrix = SHAPES[typeIdx]; player.pos.y = 0; player.pos.x = (COLS / 2 | 0) - (player.matrix[0].length / 2 | 0);
+            if (collide(board, player)) { gameOver = true; document.getElementById('overlay').style.display = 'flex'; }
+        }
+
+        function playerDrop() {
+            player.pos.y++;
+            if (collide(board, player)) { player.pos.y--; merge(board, player); checkNormalMatches(); spawnPiece(); }
+        }
+
+        function collide(scene, p) {
+            const [m, o] = [p.matrix, p.pos];
+            for (let y = 0; y < m.length; ++y) { for (let x = 0; x < m[y].length; ++x) { if (m[y][x] !== 0) {
+                const boardY = y + o.y, boardX = x + o.x;
+                if (boardX < 0 || boardX >= COLS || boardY >= ROWS || (boardY >= 0 && scene[boardY][boardX] !== 0)) return true;
+            } } }
+            return false;
+        }
+
+        function merge(scene, p) { p.matrix.forEach((row, y) => row.forEach((v, x) => { if (v && scene[y + p.pos.y]) scene[y + p.pos.y][x + p.pos.x] = v; })); }
+
+        function checkNormalMatches() {
+            for(let y=ROWS-1; y>=0; y--) { if(board[y].every(v => v!==0)) { board.splice(y, 1); board.unshift(new Array(COLS).fill(0)); score += 100; y++; } }
+            updateUI();
+        }
+
+        function bindControls() {
+            document.getElementById('btn-left').onclick = () => { player.pos.x--; if(collide(board, player)) player.pos.x++; };
+            document.getElementById('btn-right').onclick = () => { player.pos.x++; if(collide(board, player)) player.pos.x--; };
+            document.getElementById('btn-rotate').onclick = () => { 
+                const old = player.matrix; player.matrix = player.matrix[0].map((_, i) => player.matrix.map(row => row[i]).reverse());
+                if(collide(board, player)) player.matrix = old;
+            };
+            document.getElementById('btn-down').onclick = () => playerDrop();
+        }
+
+        function updateUI() { document.getElementById('score').innerText = score; document.getElementById('level').innerText = level; }
+        function drawPreview() { previewCtx.clearRect(0,0,60,60); if(nextType) drawCandy(previewCtx, 0.5, 0.5, nextType, 40); }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js'); });
+        }
+    </script>
+</body>
+</html>
         }
 
         function draw() {
@@ -689,4 +741,5 @@
     </script>
 </body>
 </html>
+
 
